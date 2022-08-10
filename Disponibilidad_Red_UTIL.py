@@ -8,6 +8,7 @@ directorio=  "../2. DATAS/2.2 DATAS HISTORICAS/" + nombreArchivo
 
 
 def leer_archivo():
+    #lee el archivo en el directorio dado 
     df = pd.read_csv(directorio , sep="," , encoding='latin-1')
     return df
 
@@ -36,6 +37,7 @@ def formatearFecha(df):
 
 def insertarNombresNodos(df , nombresPrimarios):
     df.insert(11,'Nombre Nodo' , 'IP' )
+    #Inserta el nombre del nodo al que pertenecen los repetidores
     for nombre in nombresPrimarios:
         ind = list(np.where(df['Managed Resource'].str.contains(nombre)))
         indice= ind[0]
@@ -55,70 +57,70 @@ def GenerarConteoDeReps(nodos , df):
         dfaux= dfaux['Managed Resource'].drop_duplicates()
         agrupado=dfaux.tolist()
         
+        #Agregar a la tabla NodosConReps los valores dados
         NodosConReps= pd.concat([NodosConReps, pd.DataFrame([{'Nombre Nodo' : nombresNodos[nodo] , 'Cantidad de Repetidores' :len(dfaux) , 'Nombre Repetidores' : agrupado}])])
     
     NodosConReps.reset_index(drop=True , inplace=True)
     return NodosConReps
 
+def generarRelacionesFechas(df, n_nodos):
+
+    df.insert(8,"Final Falla", np.nan)
+    #Para realizar prueba final
+    for fila in range(len(nombresNodos)):
+        #dfPrueba=pd.DataFrame()
+        auxRep=n_nodos.loc[fila,'Nombre Repetidores']
+
+        indexFailure= "vacio"
+        horaClear= "vacio"
+
+        for NodoRep in auxRep:
+            dfaux=pd.DataFrame()
+            dfaux= pd.concat([dfaux , df[df['Managed Resource']==NodoRep] ])
+            dfaux.reset_index(inplace=True)
+            
+            variasHorasClear=[]
+            longitud=len(dfaux)
+
+            for i in range(longitud):
+                
+                if dfaux['Severity'].iloc[i]== "CommFailure":
+                    if len(variasHorasClear) >=1:        
+                        dfaux.at[indexFailure, 'Final Falla'] = variasHorasClear
+                        variasHorasClear=[]
+                        indexFailure="vacio"
+                        horaClear="vacio"
+
+                    indexFailure=dfaux.index[i]
+                    
+                elif dfaux['Severity'].iloc[i]== "Clear" and indexFailure!="vacio":
+                    horaClear=dfaux['Date/Time'].iloc[i]
+                    variasHorasClear.append(horaClear.strftime("%Y-%m-%d %H:%M:%S"))
+                    
+                
+                if i== (longitud-1) and len(variasHorasClear)>=1 and indexFailure!="vacio":
+                    dfaux.at[indexFailure, 'Final Falla'] = variasHorasClear
+                    variasHorasClear=[]
+                    indexFailure="vacio"
+                    horaClear="vacio"
+            
+            for cic in range(len(dfaux)):
+                indicedata= dfaux['index'].iloc[cic]
+                horaFinalFalla= dfaux['Final Falla'].iloc[cic]
+                df.at[indicedata, 'Final Falla'] = horaFinalFalla
+    return df
+
 data= leer_archivo()
 data= formatearFecha(data)
 nombresNodos= generarNombresDeNodos(data)
 data= insertarNombresNodos(data , nombresNodos)
-nombresNodos= GenerarConteoDeReps(nombresNodos , data)
 '''DATA'''
 data
+nombresNodos= GenerarConteoDeReps(nombresNodos , data)
+data= generarRelacionesFechas(data, nombresNodos)
 
-#Para realizar la prueba con el nodo castilla
-auxNombre=nombresNodos.loc[0,'Nombre Nodo']
-auxRep=nombresNodos.loc[0,'Nombre Repetidores']
-
-dfPrueba= data[data['Managed Resource'].isin(auxRep)].copy()
-dfPrueba.insert(8,"Final Falla", np.nan)
-
-#'''DATAFRAME FILTRADO POR NODO CASTILLA'''
-#dfPrueba
-
-indexFailure= "vacio"
-horaClear= "vacio"
-for NodoRep in auxRep:
-    dfaux=pd.DataFrame()
-    dfaux= pd.concat([dfaux , dfPrueba[dfPrueba['Managed Resource']==NodoRep] ])
-    dfaux.reset_index(inplace=True)
-    
-    variasHorasClear=[]
-    longitud=len(dfaux)
-    for i in range(longitud):
-        
-        if dfaux['Severity'].iloc[i]== "CommFailure":
-            if len(variasHorasClear) >=1:        
-                dfaux.at[indexFailure, 'Final Falla'] = variasHorasClear
-                variasHorasClear=[]
-                indexFailure="vacio"
-                horaClear="vacio"
-
-            indexFailure=dfaux.index[i]
-            
-            
-
-        elif dfaux['Severity'].iloc[i]== "Clear" and indexFailure!="vacio":
-            horaClear=dfaux['Date/Time'].iloc[i]
-            variasHorasClear.append(horaClear.strftime("%Y-%m-%d %H:%M:%S"))
-            
-        
-        if i== (longitud-1) and len(variasHorasClear)>=1 and indexFailure!="vacio":
-            print(i)
-            dfaux.loc[indexFailure, 'Final Falla'] = variasHorasClear
-            variasHorasClear=[]
-            indexFailure="vacio"
-            horaClear="vacio"
-    
-    '''DATAFRAME FINAL PRUEBA'''
-    dfaux
-    for cic in range(len(dfaux)):
-        indicedata= dfaux['index'].iloc[cic]
-        horaFinalFalla= dfaux['Final Falla'].iloc[cic]
-
-        data.at[indicedata, 'Final Falla'] = horaFinalFalla
-
-'''Data con valores de tiempo final de falla'''
-data.to_excel("pruebaData.xlsx")
+'''TABLA CON NOMBRES DE NODOS , CANTIDAD DE REPETIDORES Y NOMBRES DE REPETIDORES'''
+nombresNodos
+'''DATA CON VALORES DE TIEMPO FINAL DE FALLA O CLEAR'''
+data
+#data.to_excel("PruebaFinal.xlsx")
