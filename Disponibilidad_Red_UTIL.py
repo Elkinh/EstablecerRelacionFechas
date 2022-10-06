@@ -1,14 +1,13 @@
-
 import pandas as pd
 import numpy as np
 import datetime
+import calendar
 
 pd.options.mode.chained_assignment = None  # default='warn'
-nombreArchivo= '2022-08-02_21-23-17.csv'
+nombreArchivo= 'data_dispo_red.csv'
 nombreDocNodos= 'NodosR2V_TRBONET.xlsx'
 directorio=  '../2. DATAS/2.2 DATAS HISTORICAS/' + nombreArchivo
 directorioNodos= '../2. DATAS/2.2 DATAS HISTORICAS/' + nombreDocNodos
-
 
 def leer_archivo(nombreArchivo , tipo):
     if tipo=='csv':
@@ -25,11 +24,8 @@ def generarNombresDeNodos(df):
     df2= pd.DataFrame()
     df2= df['Managed Resource'].copy()
     
-    #Reemplaza todas las Castilla # por solo Castilla
-    df2= df2.replace(['Castilla 1', 'Castilla 2', 'Castilla 3' , 'Castilla 4'], 'Castilla')
-    
     #Separa en 2 columnas para dejar solo el nombre del nodo y en otra columna el número del repetidor
-    df2= df2.str.split('RPT', expand=True)
+    df2= df2.str.split(' RPT', expand=True)
     
     #Para eliminar los nombres de los nodos que tienen por nombre direcciones IP que empiezan por 172
     ind = list(np.where(df2[0].str.contains('172')))
@@ -60,8 +56,7 @@ def GenerarConteoDeReps(nodos , df):
     for nodo in range(len(nodos)):
         dfaux=pd.DataFrame()
         #Filtrar por cada nombre de nodo
-        dfaux= df[df['Nombre Nodo'].str.contains(nodos[nodo])].copy()
-        
+        dfaux= df[df['Nombre Nodo']==nodos[nodo]].copy()
         #Obtener todos los nombres de los repetidores por nodo eliminando los duplicados
         dfaux= dfaux['Managed Resource'].drop_duplicates()
         agrupado=dfaux.tolist()
@@ -190,10 +185,6 @@ def Condicion_Mayor_5_Min(df):
 
 def Condicion_Degradacion_Servicio(df , nodosReps):
     for fila in range(len(nodosReps)):
-        longAux= len(nodosReps['Nombre Repetidores'].iloc[fila])
-        #print(longAux)
-        #print( nodosReps['Nombre Repetidores'].iloc[fila])
-        
         for repetidor in nodosReps['Nombre Repetidores'].iloc[fila]:
             #Se genera un df auxiliar para filtrar por el repetidor en evaluación
             dfaux=pd.DataFrame()
@@ -217,7 +208,6 @@ def Condicion_Degradacion_Servicio(df , nodosReps):
                     dfaux['Aplica Degradacion Serv'].iloc[i-1]='SI'
                     dfaux['Aplica Degradacion Serv'].iloc[i]='SI'
 
-
             #Se pasa del df_auxiliar a la data original
             for cic in range(len(dfaux)):
                 indicedata= dfaux['index'].iloc[cic]
@@ -228,13 +218,12 @@ def Condicion_Degradacion_Servicio(df , nodosReps):
     return df
 
 def relacionCantNodosTotales(df_final, dataOficialNodos):
-    df_final['Cant Nodos']= np.nan
+    df_final['Cant RPTs Nodo']= np.nan
     for i in range(len(dataOficialNodos)):
         ind = list(np.where(df_final['Nombre Nodo'] == dataOficialNodos['Nombre Nodo'].iloc[i]))
         indice= ind[0]
         for j in indice:
-            df_final['Cant Nodos'].iloc[j] = dataOficialNodos['Cantidad de Repetidores'].iloc[i]
-    
+            df_final['Cant RPTs Nodo'].iloc[j] = int(dataOficialNodos['Cantidad de Repetidores'].iloc[i])
     return df_final
 
 def quitarSegundosFechas(data):
@@ -244,8 +233,52 @@ def quitarSegundosFechas(data):
     data['AplicaIndicador']= np.where(((data['Aplica Degradacion Serv']=='SI') | (data['Int Mayor a 5 Min']=='SI')),'SI','NO')
     return data
 
+def cambiarBarranca_2(df2):
+    for i in range(1,20):
+        if i<=9:
+            df2['Managed Resource']=df2['Managed Resource'].replace(['Barranca 2 RPT '+str(i)],'Barranc2 RPT '+str(i))
+            df2['Managed Resource']=df2['Managed Resource'].replace(['Castilla '+str(i)],'Castilla RPT '+str(i))
+        else:
+            df2['Managed Resource']=df2['Managed Resource'].replace(['Barranca 2 RPT'+str(i)],'Barranc2 RPT '+str(i))
+    return df2
+
+def ajusteMeSiguiente(df_final):
+    #Calcular si los meses de las fechas de Desconexion y Reconexion son diferentes
+    df_final['MesDistinto']= np.where(((pd.DatetimeIndex(df_final['Date/Time']).month   !=  pd.DatetimeIndex(df_final['Final Falla Primer Clear']).month)),'SI','NO')
+    
+    ind = list(np.where(df_final['MesDistinto'] == 'SI'))
+    indice= ind[0]
+    
+    if len(indice) > 0:
+        for indexF in indice:
+            #Copiar fila a modificar
+            mesDuplicado=df_final.iloc[[indexF]].copy()
+
+            #Obtener fechas Desconexion y reconexion
+            fechaDesconexion=pd.to_datetime( df_final['Date/Time'].iloc[indexF] , format='%d%m%Y %H:%M:%S' )
+            fechaReconexion=pd.to_datetime( df_final['Final Falla Primer Clear'].iloc[indexF] , format='%d%m%Y %H:%M:%S' )
+            #Calcular Ultimo dia del mes fecha desconexion
+            ultDiaMes=calendar.monthrange(fechaDesconexion.year, fechaDesconexion.month)
+            
+            #MODIFICAR FECHA FINAL DE FALLA PARA QUE SE TENGA EN CUENTA EN EL MES ANTERIOR
+            #Seleccionar como final falla el último dia del mes
+            df_final.at[indexF, 'Final Falla Primer Clear'] = pd.to_datetime( str(ultDiaMes[1]) + str(fechaDesconexion.month) +str(fechaDesconexion.year) + ' ' + '23:59:59' , format='%d%m%Y %H:%M:%S'  )
+            
+            #MODIFICAR FECHA INICIO DE FALLA PARA QUE SE TENGA EN CUENTA EN EL MES SIGUIENTE/ACTUAL
+            mesDuplicado.at[indexF, 'Date/Time'] = pd.to_datetime( '01' + str(fechaReconexion.month) +str(fechaReconexion.year) + ' ' + '00:00:00' , format='%d%m%Y %H:%M:%S'  )
+
+            df_final= pd.concat([df_final , mesDuplicado ])
+            df_final.reset_index(inplace=True , drop=True)
+    
+    return df_final
+
+def dinamicaData(df):
+    df2= pd.pivot_table(df , index=['Date/Time Sin Seg','Final Falla Primer Clear Sin Seg','Nombre Nodo','AplicaIndicador','Aplica Degradacion Serv','Int Mayor a 5 Min'] ,values=['Managed Resource','Cant RPTs Nodo','Disponibilidad','Segundos Indispo'] , aggfunc={'Managed Resource':  np.count_nonzero , 'Cant RPTs Nodo': np.mean , 'Disponibilidad': np.mean , 'Segundos Indispo':np.mean})
+    df2.reset_index(inplace=True)
+    return df2
 
 data= leer_archivo(directorio , 'csv')
+data= cambiarBarranca_2(data)
 dataNodos= leer_archivo(directorioNodos , 'xlsx')
 data= formatearFecha(data)
 nombresNodos= generarNombresDeNodos(data)
@@ -253,14 +286,20 @@ data= insertarNombresNodos(data , nombresNodos)
 nombresNodos= GenerarConteoDeReps(nombresNodos , data)
 data= generarRelacionesFechas(data, nombresNodos)
 data= AjusteVariosDias(data)
+data=ajusteMeSiguiente(data)
 data= indispoSegMin(data)
 data= Condicion_Mayor_5_Min(data)
 data= Condicion_Degradacion_Servicio(data, nombresNodos)
 data= relacionCantNodosTotales(data , dataNodos)
 data=quitarSegundosFechas(data)
-'''TABLA CON NOMBRES DE NODOS , CANTIDAD DE REPETIDORES Y NOMBRES DE REPETIDORES'''
-#nombresNodos
+Tabla_Dinamica_data = dinamicaData(data)
 
+
+'''TABLA CON NOMBRES DE NODOS , CANTIDAD DE REPETIDORES Y NOMBRES DE REPETIDORES'''
+nombresNodos
 '''DATA CON VALORES DE TIEMPO FINAL DE FALLA O CLEAR'''
-#data
-data.to_excel("PruebaDataTRBONET.xlsx")
+#Tabla_Dinamica_data.to_excel('DinamicaData.xlsx')
+
+data
+Tabla_Dinamica_data
+#data.to_excel("PruebaDataTRBONET_FINAL.xlsx")
